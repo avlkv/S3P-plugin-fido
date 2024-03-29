@@ -4,13 +4,17 @@
 1/2 документ плагина
 """
 import logging
-import os
 import time
-
+import dateparser
+from datetime import datetime
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.webdriver import WebDriver
 from src.spp.types import SPP_document
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 
-class PAYLOAD_CLASS:
+class FIDO:
     """
     Класс парсера плагина SPP
 
@@ -22,10 +26,11 @@ class PAYLOAD_CLASS:
 
     """
 
-    SOURCE_NAME = '<unique source name>'
+    SOURCE_NAME = 'fido'
     _content_document: list[SPP_document]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, webdriver: WebDriver, categories: dict, last_document: SPP_document = None, max_count_documents: int = 100,
+                 num_scrolls: int = 25, *args, **kwargs):
         """
         Конструктор класса парсера
 
@@ -34,6 +39,12 @@ class PAYLOAD_CLASS:
         """
         # Обнуление списка
         self._content_document = []
+        self.CATEGORIES = categories
+        self.NUM_SCROLLS = num_scrolls
+        self.driver = webdriver
+        self.wait = WebDriverWait(self.driver, timeout=20)
+        self.max_count_documents = max_count_documents
+        self.last_document = last_document
 
         # Логер должен подключаться так. Вся настройка лежит на платформе
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -59,14 +70,61 @@ class PAYLOAD_CLASS:
         :rtype:
         """
         # HOST - это главная ссылка на источник, по которому будет "бегать" парсер
-        self.logger.debug(F"Parser enter to {HOST}")
+        self.logger.debug(F"Parser enter")
 
-        # ========================================
-        # Тут должен находится блок кода, отвечающий за парсинг конкретного источника
-        # -
+        # Должно быть два конфига: файловый и нативный
+        # categories = {'FIDO News Center': 'https://fidoalliance.org/content/fido-news-center/',   - NATIVE
+        #               'FIDO Case Studies': 'https://fidoalliance.org/content/case-study/',        - FILE
+        #                       (заголовок и аннотация со страницы FIDO, а текст из файла)
+        #               'FIDO In the News': 'https://fidoalliance.org/content/fido-in-the-news/',   - NATIVE
+        #                       (нужно переходить к прикрепленным ссылкам и сохранять оттуда весь контент, а в аннотацию
+        #                         то, что было написано на странице FIDO, заголовок тоже с FIDO)
+        #               'FIDO Presentations': 'https://fidoalliance.org/content/presentation/',     - NATIVE
+        #               'FIDO White Papers': 'https://fidoalliance.org/content/white-paper/'}       - FILE
+        #                       (заголовок и аннотация со страницы FIDO, а текст из файла)
+        for category in self.CATEGORIES:
 
-        # Логирование найденного документа
-        self.logger.info(self._find_document_text_for_logger(document))
+            self.driver.get(self.CATEGORIES[category])
+
+            scroll_counter = 0
+
+            try:
+
+                doc_table = self.driver.find_elements(By.TAG_NAME, '//li[contains(@class,\'card-products\')]')
+                last_doc_table_len = len(doc_table)
+
+                while True:
+                    # Scroll down to bottom
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    scroll_counter += 1
+                    # self.logger.info(f"counter = {counter}")
+
+                    # Wait to load page
+                    time.sleep(1)
+
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
+                    # Wait to load page
+                    time.sleep(1)
+
+                    doc_table = self.driver.find_elements(By.TAG_NAME, '//li[contains(@class,\'card-products\')]')
+                    new_doc_table_len = len(doc_table)
+                    if last_doc_table_len == new_doc_table_len:
+                        break
+                    if scroll_counter > self.NUM_SCROLLS:
+                        flag = False
+                        break
+
+            except Exception as e:
+                self.logger.debug('Не удалось найти scroll')
+                break
+
+            self.logger.debug(f'Обработка списка элементов ({len(doc_table)})...')
+
+            for doc in doc_table:
+
+
+
 
         # ---
         # ========================================
