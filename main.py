@@ -44,7 +44,7 @@ native_categories = {'FIDO News Center': 'https://fidoalliance.org/content/fido-
 file_categories = {'FIDO Case Studies': 'https://fidoalliance.org/content/case-study/',
                    'FIDO White Papers': 'https://fidoalliance.org/content/white-paper/'}
 
-parser = FIDO(driver(), max_count_documents=2, categories=native_categories, num_scrolls=1, source_type='NATIVE')
+parser = FIDO(driver(), max_count_documents=50, categories=file_categories, num_scrolls=2, source_type='FILE')
 docs: list[SPP_document] = parser.content()
 
 try:

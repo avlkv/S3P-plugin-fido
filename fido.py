@@ -29,7 +29,8 @@ class FIDO:
     SOURCE_NAME = 'fido'
     _content_document: list[SPP_document]
 
-    def __init__(self, webdriver: WebDriver, source_type: str, categories: dict, last_document: SPP_document = None, max_count_documents: int = 100,
+    def __init__(self, webdriver: WebDriver, source_type: str, categories: dict, last_document: SPP_document = None,
+                 max_count_documents: int = 100,
                  num_scrolls: int = 25, *args, **kwargs):
         """
         Конструктор класса парсера
@@ -63,8 +64,12 @@ class FIDO:
         :rtype:
         """
         self.logger.debug("Parse process start")
-        self._parse()
-        self.logger.debug("Parse process finished")
+        try:
+            self._parse()
+        except Exception as e:
+            self.logger.debug(f'Parsing stopped with error: {e}')
+        else:
+            self.logger.debug("Parse process finished")
         return self._content_document
 
     def _parse(self):
@@ -98,8 +103,10 @@ class FIDO:
             scroll_counter = 0
 
             try:
+                time.sleep(3)
 
-                doc_table = self.driver.find_elements(By.TAG_NAME, '//li[contains(@class,\'card-products\')]')
+                self.close_popup()
+                doc_table = self.driver.find_elements(By.XPATH, '//li[contains(@class,\'card-products\')]')
                 last_doc_table_len = len(doc_table)
 
                 while True:
@@ -109,7 +116,7 @@ class FIDO:
                     # self.logger.info(f"counter = {counter}")
 
                     # Wait to load page
-                    time.sleep(1)
+                    time.sleep(3)
 
                     self.close_popup()
 
@@ -118,7 +125,7 @@ class FIDO:
                     # Wait to load page
                     time.sleep(1)
 
-                    doc_table = self.driver.find_elements(By.TAG_NAME, '//li[contains(@class,\'card-products\')]')
+                    doc_table = self.driver.find_elements(By.XPATH, '//li[contains(@class,\'card-products\')]')
                     new_doc_table_len = len(doc_table)
                     if last_doc_table_len == new_doc_table_len:
                         break
@@ -133,13 +140,15 @@ class FIDO:
             self.logger.debug(f'Обработка списка элементов ({len(doc_table)})...')
 
             for doc in doc_table:
-                doc_link = doc.find_element(By.XPATH, './h2/a').get_attribute('href')
+                doc_link = doc.find_element(By.XPATH, './/h2/a').get_attribute('href')
 
                 self.driver.execute_script("window.open('');")
                 self.driver.switch_to.window(self.driver.window_handles[1])
 
                 self.driver.get(doc_link)
                 self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.wp-block-post-title')))
+
+                self.logger.debug(f'Entered: {doc_link}')
 
                 title = self.driver.find_element(By.XPATH, "//h1[contains(@class,'wp-block-post-title\')]").text
 
@@ -148,23 +157,37 @@ class FIDO:
 
                 if self.SOURCE_TYPE == 'NATIVE':
 
-                    text_content = self.driver.find_element(By.XPATH, "//div[contains(@class,'wp-block-post-content')]").text
+                    text_content = self.driver.find_element(By.XPATH,
+                                                            "//div[contains(@class,'wp-block-post-content')]").text
 
                     abstract = None
 
                     web_link = doc_link
 
+                    other_data = {'category': category}
+
                 elif self.SOURCE_TYPE == 'FILE':
 
-                    abstract = self.driver.find_element(By.XPATH, "//div[contains(@class,'wp-block-post-content')]").text
+                    try:
+                        abstract = self.driver.find_element(By.XPATH,
+                                                            "//div[contains(@class,'wp-block-post-content')]").text
+                        web_link = self.driver.find_element(By.XPATH,
+                                                            "//div[@class='wp-block-button']/a").get_attribute('href')
+                        text_content = None
 
-                    web_link = self.driver.find_element(By.XPATH, "//div[@class='wp-block-button']/a").get_attribute('href')
+                        other_data = {'category': category, 'fido_link': doc_link}
+
+                    except:
+                        web_link = doc_link
+                        abstract = None
+                        text_content = self.driver.find_element(By.XPATH,
+                                                                "//div[contains(@class,'wp-block-post-content')]").text
+
+                        other_data = {'category': category}
 
                 else:
                     self.logger.info('Неизвестный тип источника SOURCE_TYPE')
                     raise ValueError('source_type must be a type of source: "FILE" or "NATIVE"')
-
-                other_data = {'category': category}
 
                 doc = SPP_document(None,
                                    title,
@@ -181,19 +204,17 @@ class FIDO:
                 self.driver.close()
                 self.driver.switch_to.window(self.driver.window_handles[0])
 
-
     def close_popup(self):
 
         try:
-            close_btn = self.driver.find_element(By.XPATH, "//span[@class = 'hustle-icon-close']")
+            # close_btn = self.driver.find_element(By.XPATH, "//span[@class = 'hustle-icon-close']")
+            close_btn = self.driver.find_element(By.XPATH, "//button[contains(@class,'hustle-button-close')]")
             try:
                 close_btn.click()
-            except:
-                self.logger.exception("Can't click the close button in popup")
+            except Exception as e:
+                self.logger.debug(f"Can't click the close button in popup with Exception: {e}")
         except:
             self.logger.debug('Popup not found')
-
-
 
     @staticmethod
     def _find_document_text_for_logger(self, doc: SPP_document):
@@ -217,5 +238,4 @@ class FIDO:
             raise Exception(f"Max count articles reached ({self.max_count_documents})")
 
         self._content_document.append(_doc)
-        self.logger.info(self._find_document_text_for_logger(_doc))
-
+        self.logger.info(self._find_document_text_for_logger(self, _doc))
