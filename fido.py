@@ -29,7 +29,7 @@ class FIDO:
     SOURCE_NAME = 'fido'
     _content_document: list[SPP_document]
 
-    def __init__(self, webdriver: WebDriver, categories: dict, last_document: SPP_document = None, max_count_documents: int = 100,
+    def __init__(self, webdriver: WebDriver, source_type: str, categories: dict, last_document: SPP_document = None, max_count_documents: int = 100,
                  num_scrolls: int = 25, *args, **kwargs):
         """
         Конструктор класса парсера
@@ -41,6 +41,10 @@ class FIDO:
         self._content_document = []
         self.CATEGORIES = categories
         self.NUM_SCROLLS = num_scrolls
+        if source_type:
+            self.SOURCE_TYPE = source_type
+        else:
+            raise ValueError('source_type must be a type of source: "FILE" or "NATIVE"')
         self.driver = webdriver
         self.wait = WebDriverWait(self.driver, timeout=20)
         self.max_count_documents = max_count_documents
@@ -74,14 +78,19 @@ class FIDO:
 
         # Должно быть два конфига: файловый и нативный
         # categories = {'FIDO News Center': 'https://fidoalliance.org/content/fido-news-center/',   - NATIVE
+        #
         #               'FIDO Case Studies': 'https://fidoalliance.org/content/case-study/',        - FILE
         #                       (заголовок и аннотация со страницы FIDO, а текст из файла)
+        #
         #               'FIDO In the News': 'https://fidoalliance.org/content/fido-in-the-news/',   - NATIVE
         #                       (нужно переходить к прикрепленным ссылкам и сохранять оттуда весь контент, а в аннотацию
         #                         то, что было написано на странице FIDO, заголовок тоже с FIDO)
+        #
         #               'FIDO Presentations': 'https://fidoalliance.org/content/presentation/',     - NATIVE
+        #
         #               'FIDO White Papers': 'https://fidoalliance.org/content/white-paper/'}       - FILE
         #                       (заголовок и аннотация со страницы FIDO, а текст из файла)
+
         for category in self.CATEGORIES:
 
             self.driver.get(self.CATEGORIES[category])
@@ -101,6 +110,8 @@ class FIDO:
 
                     # Wait to load page
                     time.sleep(1)
+
+                    self.close_popup()
 
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
@@ -122,16 +133,70 @@ class FIDO:
             self.logger.debug(f'Обработка списка элементов ({len(doc_table)})...')
 
             for doc in doc_table:
+                doc_link = doc.find_element(By.XPATH, './h2/a').get_attribute('href')
+
+                self.driver.execute_script("window.open('');")
+                self.driver.switch_to.window(self.driver.window_handles[1])
+
+                self.driver.get(doc_link)
+                self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.wp-block-post-title')))
+
+                title = self.driver.find_element(By.XPATH, "//h1[contains(@class,'wp-block-post-title\')]").text
+
+                pub_date = dateparser.parse(
+                    self.driver.find_element(By.XPATH, "//h1[contains(@class,'wp-block-post-title')]/../..//time").text)
+
+                if self.SOURCE_TYPE == 'NATIVE':
+
+                    text_content = self.driver.find_element(By.XPATH, "//div[contains(@class,'wp-block-post-content')]").text
+
+                    abstract = None
+
+                    web_link = doc_link
+
+                elif self.SOURCE_TYPE == 'FILE':
+
+                    abstract = self.driver.find_element(By.XPATH, "//div[contains(@class,'wp-block-post-content')]").text
+
+                    web_link = self.driver.find_element(By.XPATH, "//div[@class='wp-block-button']/a").get_attribute('href')
+
+                else:
+                    self.logger.info('Неизвестный тип источника SOURCE_TYPE')
+                    raise ValueError('source_type must be a type of source: "FILE" or "NATIVE"')
+
+                other_data = {'category': category}
+
+                doc = SPP_document(None,
+                                   title,
+                                   abstract,
+                                   text_content,
+                                   web_link,
+                                   None,
+                                   other_data,
+                                   pub_date,
+                                   datetime.now())
+
+                self.find_document(doc)
+
+                self.driver.close()
+                self.driver.switch_to.window(self.driver.window_handles[0])
 
 
+    def close_popup(self):
+
+        try:
+            close_btn = self.driver.find_element(By.XPATH, "//span[@class = 'hustle-icon-close']")
+            try:
+                close_btn.click()
+            except:
+                self.logger.exception("Can't click the close button in popup")
+        except:
+            self.logger.debug('Popup not found')
 
 
-        # ---
-        # ========================================
-        ...
 
     @staticmethod
-    def _find_document_text_for_logger(doc: SPP_document):
+    def _find_document_text_for_logger(self, doc: SPP_document):
         """
         Единый для всех парсеров метод, который подготовит на основе SPP_document строку для логера
         :param doc: Документ, полученный парсером во время своей работы
@@ -141,52 +206,16 @@ class FIDO:
         """
         return f"Find document | name: {doc.title} | link to web: {doc.web_link} | publication date: {doc.pub_date}"
 
-    @staticmethod
-    def some_necessary_method():
+    def find_document(self, _doc: SPP_document):
         """
-        Если для парсинга нужен какой-то метод, то его нужно писать в классе.
-
-        Например: конвертация дат и времени, конвертация версий документов и т. д.
-        :return:
-        :rtype:
+        Метод для обработки найденного документа источника
         """
-        ...
+        if self.last_document and self.last_document.hash == _doc.hash:
+            raise Exception(f"Find already existing document ({self.last_document})")
 
-    @staticmethod
-    def nasty_download(driver, path: str, url: str) -> str:
-        """
-        Метод для "противных" источников. Для разных источника он может отличаться.
-        Но основной его задачей является:
-            доведение driver селениума до файла непосредственно.
+        if self.max_count_documents and len(self._content_document) >= self.max_count_documents:
+            raise Exception(f"Max count articles reached ({self.max_count_documents})")
 
-            Например: пройти куки, ввод форм и т. п.
+        self._content_document.append(_doc)
+        self.logger.info(self._find_document_text_for_logger(_doc))
 
-        Метод скачивает документ по пути, указанному в driver, и возвращает имя файла, который был сохранен
-        :param driver: WebInstallDriver, должен быть с настроенным местом скачивания
-        :_type driver: WebInstallDriver
-        :param url:
-        :_type url:
-        :return:
-        :rtype:
-        """
-
-        with driver:
-            driver.set_page_load_timeout(40)
-            driver.get(url=url)
-            time.sleep(1)
-
-            # ========================================
-            # Тут должен находится блок кода, отвечающий за конкретный источник
-            # -
-            # ---
-            # ========================================
-
-            # Ожидание полной загрузки файла
-            while not os.path.exists(path + '/' + url.split('/')[-1]):
-                time.sleep(1)
-
-            if os.path.isfile(path + '/' + url.split('/')[-1]):
-                # filename
-                return url.split('/')[-1]
-            else:
-                return ""

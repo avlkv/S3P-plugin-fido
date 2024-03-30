@@ -37,12 +37,14 @@ def to_dict(doc: SPP_document) -> dict:
     }
 
 
-categories = {'FIDO News Center': 'https://fidoalliance.org/content/fido-news-center/',
-              'FIDO Case Studies': 'https://fidoalliance.org/content/case-study/',
-              'FIDO In the News': 'https://fidoalliance.org/content/fido-in-the-news/',
-              'FIDO Presentations': 'https://fidoalliance.org/content/presentation/',
-              'FIDO White Papers': 'https://fidoalliance.org/content/white-paper/'}
-parser = FIDO(driver(), max_count_documents=50, categories=categories, num_scrolls=1)
+native_categories = {'FIDO News Center': 'https://fidoalliance.org/content/fido-news-center/',
+                     'FIDO In the News': 'https://fidoalliance.org/content/fido-in-the-news/',
+                     'FIDO Presentations': 'https://fidoalliance.org/content/presentation/'}
+
+file_categories = {'FIDO Case Studies': 'https://fidoalliance.org/content/case-study/',
+                   'FIDO White Papers': 'https://fidoalliance.org/content/white-paper/'}
+
+parser = FIDO(driver(), max_count_documents=2, categories=native_categories, num_scrolls=1, source_type='NATIVE')
 docs: list[SPP_document] = parser.content()
 
 try:
